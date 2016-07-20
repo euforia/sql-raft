@@ -9,7 +9,7 @@ This is where sql-raft comes to play.  It keeps track of when a node has changed
 # Supported Databases
 Though sql-raft is designed to support any databse, currently only the following database drivers are included:
 
-	- PostgreSQL > 9.5
+- PostgreSQL > 9.5
 
 # Roadmap
 
