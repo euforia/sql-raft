@@ -16,9 +16,9 @@ build: clean
 
 
 docker-build:
-	docker run --rm -v $(shell pwd):/go/src/$(REPO)/$(NAME) -w /go/src/$(REPO)/$(NAME) golang:1.6.2 make deps build
+	docker run --rm -v $(shell pwd):/go/src/$(REPO)/$(NAME) -w /go/src/$(REPO)/$(NAME) golang:1.6.2 make deps build CGO_ENABLED=1
 
-docker-image:
-	docker build -t euforia/$(NAME):$(VERSION) .
+docker-image-pgsql:
+	docker build -t euforia/$(NAME):$(VERSION) -f Dockerfile.pgsql .
 
-docker: docker-build docker-image
+docker: docker-build docker-image-pgsql

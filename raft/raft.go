@@ -163,6 +163,7 @@ func (rl *RaftLayer) Peers() []string {
 		log.Println("ERROR", err)
 		return []string{}
 	}
+
 	if len(peers) < 1 {
 		return peers
 	}
@@ -191,17 +192,8 @@ func (rl *RaftLayer) ServeRPC(remote string, payload []byte) ([]byte, error) {
 	op := payload[0]
 	switch op {
 	case JoinRpcOp:
-		upeer := string(payload[1:])
 
-		// join on the network the request was made one
-		ip := strings.Split(remote, ":")[0]
-		port := strings.Split(upeer, ":")[1]
-		if port == "" {
-			err = fmt.Errorf("port required: %s", upeer)
-			break
-		}
-		peer := ip + ":" + port
-
+		peer := string(payload[1:])
 		if rl.havePeer(peer) {
 			log.Println("Already have peer:", peer)
 			break

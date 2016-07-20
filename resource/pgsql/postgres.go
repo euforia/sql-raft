@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	//"syscall"
 	"time"
 )
 
@@ -34,8 +34,9 @@ type DockerPostgresResource struct {
 }
 
 func NewDockerPostgresResource() *DockerPostgresResource {
+	// TODO: autodetermine and check for > 9.3
 	d := &DockerPostgresResource{
-		pgctlPath: "/usr/lib/postgresql/9.5/bin/pg_ctl", // temporary
+		pgctlPath: "/usr/lib/postgresql/9.5/bin/pg_ctl",
 		pgBin:     "/usr/lib/postgresql/9.5/bin/postgres",
 		pgBkpBin:  "/usr/lib/postgresql/9.5/bin/pg_basebackup",
 		pgUser:    "postgres",
@@ -94,7 +95,6 @@ func (nd *DockerPostgresResource) waitForMaster(retries, interval int) error {
 		<-tkr.C
 		// TODO: check master for availability
 		cr++
-		//break
 	}
 
 	return err
@@ -112,6 +112,7 @@ func (nd *DockerPostgresResource) syncFromLeader(host string, port int) (*exec.C
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
+
 	return cmd, err
 }
 
@@ -217,13 +218,15 @@ func (nd *DockerPostgresResource) Stop() error {
 	if err = cmd.Wait(); err != nil {
 		return err
 	}
-	// Signal our process to terminate
-	if err = nd.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		// Kill if termination errors
-		log.Printf("[WARNING] Killing: pid=%d %s\n", nd.cmd.Process.Pid, nd.cmd.Process.Kill())
-	}
-
-	// block
+	/*
+		// Signal our process to terminate
+		if err = nd.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			// Kill if termination errors
+			log.Printf("[WARNING] Killing: pid=%d %s\n", nd.cmd.Process.Pid, nd.cmd.Process.Kill())
+		}
+	*/
+	log.Println("Waiting for postgres to stop...")
+	// block - wait main postgres process to finish
 	nd.cmd.Wait()
 	// Clear out our resources
 	nd.cmd = nil
