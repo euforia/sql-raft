@@ -4,43 +4,80 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
-	"sync"
-	//"io/ioutil"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	//"syscall"
+	"sync"
 	"time"
 )
 
 const (
 	pgDataDir = "/var/lib/postgresql/data/"
-	//pgDataDir = "/etc/postgresql/"
 )
 
-type DockerPostgresResource struct {
-	leader string
+type pgConf struct {
+	version string
+	user    string
+	dir     string
+	port    int
+	bins    map[string]string
+}
 
-	pgctlPath string
-	pgBin     string
-	pgBkpBin  string
-	pgUser    string
-	pgDataDir string
+func newPgConf(version string) *pgConf {
+	p := &pgConf{
+		port:    5432,
+		dir:     pgDataDir,
+		user:    "postgres",
+		bins:    map[string]string{},
+		version: version,
+	}
+
+	baseBinDir := filepath.Join("/usr/lib/postgresql", version, "bin")
+	p.bins = map[string]string{}
+	for _, v := range []string{"pg_ctl", "postgres", "pg_basebackup"} {
+		p.bins[v] = filepath.Join(baseBinDir, v)
+	}
+
+	return p
+}
+
+func (p *pgConf) promoteCmd() string {
+	return fmt.Sprintf("%s promote -D %s", p.bins["pg_ctl"], p.dir)
+}
+
+func (p *pgConf) stopCmd() string {
+	return fmt.Sprintf("%s stop -D %s", p.bins["pg_ctl"], p.dir)
+}
+
+func (p *pgConf) initCmd() string {
+	return fmt.Sprintf("%s init -D %s", p.bins["pg_ctl"], p.dir)
+}
+
+func (p *pgConf) startCmd() string {
+	return fmt.Sprintf("%s -D %s", p.bins["postgres"], p.dir)
+}
+
+func (p *pgConf) backupFromCmd(host string, port int) string {
+	return fmt.Sprintf("%s -R -D %s --host=%s --port=%d -X stream -U %s",
+		p.bins["pg_basebackup"], p.dir, host, port, p.user)
+}
+
+type DockerPostgresResource struct {
+	leader string // master db
+
+	pgconf *pgConf
 
 	cmd *exec.Cmd
 	mu  sync.Mutex
 }
 
-func NewDockerPostgresResource() *DockerPostgresResource {
+func NewDockerPostgresResource(version string) *DockerPostgresResource {
 	// TODO: autodetermine and check for > 9.3
+
 	d := &DockerPostgresResource{
-		pgctlPath: "/usr/lib/postgresql/9.5/bin/pg_ctl",
-		pgBin:     "/usr/lib/postgresql/9.5/bin/postgres",
-		pgBkpBin:  "/usr/lib/postgresql/9.5/bin/pg_basebackup",
-		pgUser:    "postgres",
-		pgDataDir: pgDataDir,
+		pgconf: newPgConf(version),
 	}
 
 	return d
@@ -48,14 +85,14 @@ func NewDockerPostgresResource() *DockerPostgresResource {
 
 func (nd *DockerPostgresResource) initResource() error {
 
-	if _, err := os.Stat(filepath.Join(nd.pgDataDir, "PG_VERSION")); err == nil {
+	if _, err := os.Stat(nd.pgPath("PG_VERSION")); err == nil {
 		return nil
 	}
 
-	os.MkdirAll(nd.pgDataDir, 0777)
-	os.Chown(nd.pgDataDir, 999, 999)
+	os.MkdirAll(nd.pgconf.dir, 0777)
+	os.Chown(nd.pgconf.dir, 999, 999)
 
-	cmd := exec.Command("su", nd.pgUser, "-c", nd.pgctlPath+" init -D "+nd.pgDataDir)
+	cmd := exec.Command("su", nd.pgconf.user, "-c", nd.pgconf.initCmd())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -69,8 +106,8 @@ func (nd *DockerPostgresResource) startResource() error {
 		return fmt.Errorf("already running: pid=%d", nd.cmd.Process.Pid)
 	}
 
-	log.Println("Launching postgres...")
-	nd.cmd = exec.Command("su", nd.pgUser, "-c", nd.pgBin+" -D "+nd.pgDataDir)
+	log.Println("Starting postgres...")
+	nd.cmd = exec.Command("su", nd.pgconf.user, "-c", nd.pgconf.startCmd())
 	nd.cmd.Stdout = os.Stdout
 	nd.cmd.Stderr = os.Stderr
 	if err := nd.cmd.Start(); err != nil {
@@ -101,14 +138,12 @@ func (nd *DockerPostgresResource) waitForMaster(retries, interval int) error {
 }
 
 // sync from leader and get recovery file.
+// remote host and remote port
 func (nd *DockerPostgresResource) syncFromLeader(host string, port int) (*exec.Cmd, error) {
-	chown(nd.pgDataDir, nd.pgUser)
-	os.Chmod(nd.pgDataDir, 0700)
+	chown(nd.pgconf.dir, nd.pgconf.user)
+	os.Chmod(nd.pgconf.dir, 0700)
 
-	cs := fmt.Sprintf("%s -R -D %s --host=%s --port=%d -X stream -U %s",
-		nd.pgBkpBin, nd.pgDataDir, host, port, nd.pgUser)
-
-	cmd := exec.Command("su", nd.pgUser, "-c", cs)
+	cmd := exec.Command("su", nd.pgconf.user, "-c", nd.pgconf.backupFromCmd(host, port))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -127,9 +162,9 @@ func (nd *DockerPostgresResource) configureFollower(leader string) error {
 
 	host := strings.Split(nd.leader, ":")[0]
 	// sync if data dir not init'd
-	if _, err := os.Stat(filepath.Join(nd.pgDataDir, "PG_VERSION")); err != nil {
-
-		if cmd, err := nd.syncFromLeader(host, 5432); err == nil {
+	if _, err := os.Stat(nd.pgPath("PG_VERSION")); err != nil {
+		// temporarily use local port configuration
+		if cmd, err := nd.syncFromLeader(host, nd.pgconf.port); err == nil {
 			if err = cmd.Wait(); err != nil {
 				return err
 			}
@@ -138,14 +173,14 @@ func (nd *DockerPostgresResource) configureFollower(leader string) error {
 
 	// set recovery.conf with required params
 	rc := defaultRecoveryConf()
-	rc.ReplUser = nd.pgUser
+	rc.ReplUser = nd.pgconf.user
 	rc.Primary = host
 
-	if err := rc.commit(nd.pgDataDir); err != nil {
+	if err := rc.commit(nd.pgconf.dir); err != nil {
 		return err
 	}
 
-	return chown(filepath.Join(nd.pgDataDir, rc.filename()), nd.pgUser)
+	return chown(nd.pgPath(rc.filename()), nd.pgconf.user)
 }
 
 func (nd *DockerPostgresResource) configureLeader() error {
@@ -155,13 +190,13 @@ func (nd *DockerPostgresResource) configureLeader() error {
 	// remove recovery.conf in case it's left over after promotion
 	func() {
 		rc := recoveryConf{}
-		os.Remove(filepath.Join(nd.pgDataDir, rc.filename()))
+		os.Remove(nd.pgPath(rc.filename()))
 	}()
 
 	var err error
 	if err = nd.initResource(); err == nil {
 		pc := defaultPostgresqlConf()
-		err = pc.commit(nd.pgDataDir)
+		err = pc.commit(nd.pgconf.dir)
 	}
 
 	return err
@@ -170,7 +205,7 @@ func (nd *DockerPostgresResource) configureLeader() error {
 // add user and commit to disk
 func (nd *DockerPostgresResource) setReplicationUser(user, address string) error {
 	hba := newPgHbaConf()
-	if err := hba.load(nd.pgDataDir); err != nil {
+	if err := hba.load(nd.pgconf.dir); err != nil {
 		return err
 	}
 
@@ -183,7 +218,7 @@ func (nd *DockerPostgresResource) setReplicationUser(user, address string) error
 	})
 
 	// add acl
-	return hba.commit(nd.pgDataDir)
+	return hba.commit(nd.pgconf.dir)
 }
 
 func (nd *DockerPostgresResource) Start(leader ...string) error {
@@ -195,7 +230,7 @@ func (nd *DockerPostgresResource) Start(leader ...string) error {
 	}
 
 	if err == nil {
-		if err = nd.setReplicationUser(nd.pgUser, "172.17.0.0/24"); err == nil {
+		if err = nd.setReplicationUser(nd.pgconf.user, "172.17.0.0/24"); err == nil {
 			err = nd.startResource()
 		}
 	}
@@ -207,7 +242,7 @@ func (nd *DockerPostgresResource) Stop() error {
 	nd.mu.Lock()
 	defer nd.mu.Unlock()
 	// Stop via pg_ctl
-	cmd := exec.Command("su", nd.pgUser, "-c", nd.pgctlPath+" stop -D "+nd.pgDataDir)
+	cmd := exec.Command("su", nd.pgconf.user, "-c", nd.pgconf.stopCmd())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -218,19 +253,12 @@ func (nd *DockerPostgresResource) Stop() error {
 	if err = cmd.Wait(); err != nil {
 		return err
 	}
-	/*
-		// Signal our process to terminate
-		if err = nd.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			// Kill if termination errors
-			log.Printf("[WARNING] Killing: pid=%d %s\n", nd.cmd.Process.Pid, nd.cmd.Process.Kill())
-		}
-	*/
+
 	log.Println("Waiting for postgres to stop...")
 	// block - wait main postgres process to finish
 	nd.cmd.Wait()
 	// Clear out our resources
 	nd.cmd = nil
-
 	return nil
 }
 
@@ -253,9 +281,7 @@ func (dp *DockerPostgresResource) Reassign(leader string) error {
 }
 
 func (dp *DockerPostgresResource) Promote() error {
-	cmdstr := fmt.Sprintf("%s promote -D %s", dp.pgctlPath, dp.pgDataDir)
-
-	cmd := exec.Command("su", dp.pgUser, "-c", cmdstr)
+	cmd := exec.Command("su", dp.pgconf.user, "-c", dp.pgconf.promoteCmd())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -264,6 +290,11 @@ func (dp *DockerPostgresResource) Promote() error {
 	}
 
 	return cmd.Wait()
+}
+
+// path relative to pgdata
+func (nd *DockerPostgresResource) pgPath(filename string) string {
+	return filepath.Join(nd.pgconf.dir, filename)
 }
 
 func chown(filename, username string) error {

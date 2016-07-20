@@ -61,7 +61,7 @@ func main() {
 		nd = resource.NewDummyResource(dfile, []string{"test"})
 
 	case "postgres":
-		nd = pgsql.NewDockerPostgresResource()
+		nd = pgsql.NewDockerPostgresResource("9.5")
 
 	default:
 		log.Fatal("Unsupported resource:", *resrc)
