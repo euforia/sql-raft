@@ -6,10 +6,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/euforia/sql-raft/raft"
 	"github.com/euforia/sql-raft/resource"
 	"github.com/euforia/sql-raft/resource/pgsql"
+)
+
+const (
+	// Time to wait before starting the backend process after
+	// cluster is stabilized.
+	defaultWaitTime = time.Duration(10)
 )
 
 var (
@@ -75,6 +82,6 @@ func main() {
 	printRaftStats(rl)
 
 	nd := initResource()
-	stmgr := newStateMgr(rl, 5, nd)
+	stmgr := newStateMgr(rl, defaultWaitTime, nd)
 	stmgr.start()
 }
