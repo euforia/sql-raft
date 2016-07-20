@@ -18,7 +18,7 @@ type postgresqlConf struct {
 func defaultPostgresqlConf() postgresqlConf {
 	return postgresqlConf{
 		WalLevel:           "hot_standby",
-		MaxWalSenders:      3,
+		MaxWalSenders:      5,
 		CheckpointSegments: 4,
 		WalKeepSegments:    4,
 		SynchStandbyNames:  []string{},
