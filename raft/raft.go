@@ -114,22 +114,9 @@ func NewRaftLayer(enableSingle bool, raftDir string, bindAddr, advAddr string) (
 
 	// RPC server
 	rl.rpc = NewClusterRPC(muxTrans.Listen(muxRpcHeader))
+	rl.registerRpcService()
 
 	return rl, nil
-}
-
-func (rl *RaftLayer) RegisterRpcService(rs RPCService) {
-	if rl.rpc.Service != nil {
-		log.Println("RPC service already registered:", rl.rpc.Service)
-		return
-	}
-
-	rl.rpc.Service = rs
-	go func() {
-		if err := rl.rpc.Serve(); err != nil {
-			log.Println("Failed to start cluster RPC:", err.Error())
-		}
-	}()
 }
 
 func (rl *RaftLayer) WatchForStateChange() chan raft.Observation {
@@ -229,6 +216,20 @@ func (rl *RaftLayer) havePeer(peer string) bool {
 		}
 	}
 	return false
+}
+
+func (rl *RaftLayer) registerRpcService() {
+	if rl.rpc.Service != nil {
+		log.Println("RPC service already registered:", rl.rpc.Service)
+		return
+	}
+	// register self
+	rl.rpc.Service = rl
+	go func() {
+		if err := rl.rpc.Serve(); err != nil {
+			log.Println("Failed to start cluster RPC:", err.Error())
+		}
+	}()
 }
 
 func (rl *RaftLayer) initAdvertAddr(advAddr string) (*net.TCPAddr, error) {

@@ -13,11 +13,14 @@ import (
 )
 
 var (
-	listenAddr = flag.String("l", "127.0.0.1:54321", "Raft bind address")
+	listenAddr = flag.String("b", "0.0.0.0:54321", "Raft bind address")
 	advertAddr = flag.String("a", "", "Raft advertise address")
 	dataDir    = flag.String("p", "/tmp/", "Raft data dir")
-	resrc      = flag.String("r", "dummy", "Backend resource")
 	join       = flag.String("j", "", "Cluster node to join")
+
+	resrc = flag.String("r", "dummy", "Backend resource [ dummy | postgres ]")
+	// default postgres version
+	rsrcVersion = flag.String("r-version", "9.5", "Version of resource")
 )
 
 func init() {
@@ -30,25 +33,10 @@ func printRaftStats(rl *raft.RaftLayer) {
 	log.Printf("\nState:\n  %s\n", b)
 }
 
-func main() {
-
-	rl, err := raft.NewRaftLayer(true, filepath.Join(*dataDir, *listenAddr), *listenAddr, *advertAddr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	rl.RegisterRpcService(rl)
-
-	if *join != "" {
-		if err := rl.Join(*join); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	printRaftStats(rl)
+func initResource() Resource {
+	log.Println("Initializing resource:", *resrc)
 
 	var nd Resource
-	log.Println("Initializing resource:", *resrc)
 
 	switch *resrc {
 	case "dummy":
@@ -61,12 +49,32 @@ func main() {
 		nd = resource.NewDummyResource(dfile, []string{"test"})
 
 	case "postgres":
-		nd = pgsql.NewDockerPostgresResource("9.5")
+		nd = pgsql.NewDockerPostgresResource(*rsrcVersion)
 
 	default:
 		log.Fatal("Unsupported resource:", *resrc)
 	}
 
+	return nd
+}
+
+func main() {
+	ddir := filepath.Join(*dataDir, *listenAddr)
+
+	rl, err := raft.NewRaftLayer(true, ddir, *listenAddr, *advertAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//rl.RegisterRpcService(rl)
+	if *join != "" {
+		if err := rl.Join(*join); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	printRaftStats(rl)
+
+	nd := initResource()
 	stmgr := newStateMgr(rl, 5, nd)
 	stmgr.start()
 }

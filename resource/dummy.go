@@ -23,6 +23,13 @@ func NewDummyResource(binPath string, args []string) *DummyResource {
 	}
 }
 
+func (nd *DummyResource) Metadata() map[string]interface{} {
+	return map[string]interface{}{
+		"bin_path": nd.binPath,
+		"bin_args": nd.binArgs,
+	}
+}
+
 func (nd *DummyResource) Start(leader ...string) error {
 	if len(leader) > 0 {
 		log.Printf("Starting as follower: leader='%s'\n", leader[0])

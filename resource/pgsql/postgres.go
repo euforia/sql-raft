@@ -17,6 +17,7 @@ const (
 	pgDataDir = "/var/lib/postgresql/data/"
 )
 
+// overall internal config user for admin'ing
 type pgConf struct {
 	version string
 	user    string
@@ -75,12 +76,28 @@ type DockerPostgresResource struct {
 
 func NewDockerPostgresResource(version string) *DockerPostgresResource {
 	// TODO: autodetermine and check for > 9.3
-
 	d := &DockerPostgresResource{
 		pgconf: newPgConf(version),
 	}
 
 	return d
+}
+
+func (nd *DockerPostgresResource) Metadata() map[string]interface{} {
+	m := map[string]interface{}{
+		"port":    nd.pgconf.port,
+		"version": nd.pgconf.version,
+	}
+
+	i := 0
+	bins := make([]string, len(nd.pgconf.bins))
+	for _, v := range nd.pgconf.bins {
+		bins[i] = v
+		i++
+	}
+
+	m["bins"] = bins
+	return m
 }
 
 func (nd *DockerPostgresResource) initResource() error {
@@ -90,7 +107,8 @@ func (nd *DockerPostgresResource) initResource() error {
 	}
 
 	os.MkdirAll(nd.pgconf.dir, 0777)
-	os.Chown(nd.pgconf.dir, 999, 999)
+	//os.Chown(nd.pgconf.dir, 999, 999)
+	chown(nd.pgconf.dir, nd.pgconf.user)
 
 	cmd := exec.Command("su", nd.pgconf.user, "-c", nd.pgconf.initCmd())
 	cmd.Stdout = os.Stdout

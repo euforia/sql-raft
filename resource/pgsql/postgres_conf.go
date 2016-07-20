@@ -3,6 +3,7 @@ package pgsql
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 type postgresqlConf struct {
@@ -11,6 +12,7 @@ type postgresqlConf struct {
 	CheckpointSegments int
 	WalKeepSegments    int
 	HotStandby         bool
+	SynchStandbyNames  []string //synchronous_standby_names
 }
 
 func defaultPostgresqlConf() postgresqlConf {
@@ -19,6 +21,7 @@ func defaultPostgresqlConf() postgresqlConf {
 		MaxWalSenders:      3,
 		CheckpointSegments: 4,
 		WalKeepSegments:    4,
+		SynchStandbyNames:  []string{},
 	}
 }
 
@@ -39,6 +42,10 @@ func (pc *postgresqlConf) commit(datadir string) error {
 
 	if pc.HotStandby {
 		cf.set("hot_standby", "on")
+	}
+
+	if len(pc.SynchStandbyNames) > 0 {
+		cf.set("synchronous_standby_names", strings.Join(pc.SynchStandbyNames, ","))
 	}
 
 	return cf.commit()

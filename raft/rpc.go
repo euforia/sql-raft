@@ -44,11 +44,10 @@ func (crpc *ClusterRPC) Serve() error {
 }
 
 func (crpc *ClusterRPC) handleConn(conn net.Conn) {
-	log.Println("Accepting request from:", conn.RemoteAddr())
 
 	b, err := recvRpcMessage(conn)
 	if err == nil {
-		log.Println("Received bytes:", len(b))
+		log.Printf("Request from: %s %d bytes\n", conn.RemoteAddr(), len(b))
 
 		var resp []byte
 		resp, err = crpc.Service.ServeRPC(conn.RemoteAddr().String(), b)
